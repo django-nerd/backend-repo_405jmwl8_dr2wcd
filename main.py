@@ -1,71 +1,76 @@
-import os
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from typing import List
+import os
 
-app = FastAPI()
+from schemas import Lead, Application, TestResponse
+from database import create_document, get_db, get_documents
+
+app = FastAPI(title="TechConnect Systems GmbH API", version="1.0.0")
+
+# CORS setup for frontend local/dev
+origins = [
+    os.getenv("FRONTEND_URL", "http://localhost:3000"),
+    "*",
+]
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
 @app.get("/")
-def read_root():
-    return {"message": "Hello from FastAPI Backend!"}
+async def root():
+    return {"message": "TechConnect API running"}
 
-@app.get("/api/hello")
-def hello():
-    return {"message": "Hello from the backend API!"}
+@app.get("/test", response_model=TestResponse)
+async def test():
+    db = await get_db()
+    collections = await db.list_collection_names()
+    return TestResponse(
+        backend="FastAPI",
+        database="MongoDB",
+        database_url=os.getenv("DATABASE_URL", "mongodb://localhost:27017"),
+        database_name=os.getenv("DATABASE_NAME", "appdb"),
+        connection_status="connected",
+        collections=collections,
+    )
 
-@app.get("/test")
-def test_database():
-    """Test endpoint to check if database is available and accessible"""
-    response = {
-        "backend": "✅ Running",
-        "database": "❌ Not Available",
-        "database_url": None,
-        "database_name": None,
-        "connection_status": "Not Connected",
-        "collections": []
-    }
-    
+@app.post("/leads")
+async def create_lead(lead: Lead):
     try:
-        # Try to import database module
-        from database import db
-        
-        if db is not None:
-            response["database"] = "✅ Available"
-            response["database_url"] = "✅ Configured"
-            response["database_name"] = db.name if hasattr(db, 'name') else "✅ Connected"
-            response["connection_status"] = "Connected"
-            
-            # Try to list collections to verify connectivity
-            try:
-                collections = db.list_collection_names()
-                response["collections"] = collections[:10]  # Show first 10 collections
-                response["database"] = "✅ Connected & Working"
-            except Exception as e:
-                response["database"] = f"⚠️  Connected but Error: {str(e)[:50]}"
-        else:
-            response["database"] = "⚠️  Available but not initialized"
-            
-    except ImportError:
-        response["database"] = "❌ Database module not found (run enable-database first)"
+        lead_id = await create_document("lead", lead.model_dump())
+        return {"status": "ok", "id": lead_id}
     except Exception as e:
-        response["database"] = f"❌ Error: {str(e)[:50]}"
-    
-    # Check environment variables
-    import os
-    response["database_url"] = "✅ Set" if os.getenv("DATABASE_URL") else "❌ Not Set"
-    response["database_name"] = "✅ Set" if os.getenv("DATABASE_NAME") else "❌ Not Set"
-    
-    return response
+        raise HTTPException(status_code=500, detail=str(e))
 
+@app.post("/applications")
+async def create_application(apply: Application):
+    try:
+        app_id = await create_document("application", apply.model_dump())
+        return {"status": "ok", "id": app_id}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
-if __name__ == "__main__":
-    import uvicorn
-    port = int(os.getenv("PORT", 8000))
-    uvicorn.run(app, host="0.0.0.0", port=port)
+@app.get("/faqs")
+async def get_faqs():
+    # Example static FAQs; could be fetched from DB if needed
+    faqs = [
+        {"question": "How do you handle data security?", "answer": "We implement zero-trust architecture, end-to-end encryption, and regular audits."},
+        {"question": "Do you offer on-prem options?", "answer": "Yes, all platforms can be deployed on-premise or as managed cloud."},
+        {"question": "Where are you located?", "answer": "Munich, Germany with remote-first teams across the EU."},
+    ]
+    return faqs
+
+@app.get("/jobs")
+async def get_jobs():
+    jobs = [
+        {"id": "1", "title": "Senior Cloud Architect", "location": "Munich / Remote", "type": "Full-time"},
+        {"id": "2", "title": "Data Engineer (Python)", "location": "Munich / Remote", "type": "Full-time"},
+        {"id": "3", "title": "Cybersecurity Analyst", "location": "Munich / Remote", "type": "Full-time"},
+        {"id": "4", "title": "Frontend Engineer (React)", "location": "Munich / Remote", "type": "Full-time"},
+    ]
+    return jobs
